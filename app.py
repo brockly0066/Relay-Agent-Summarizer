@@ -417,7 +417,7 @@ if run_clicked:
             st.write(f"◆ {stages[-1]}")
 
             try:
-                genai.configure(api_key=api_key)
+                genai.configure(api_key=api_key, transport="rest")
                 gmodel = genai.GenerativeModel(model_name)
 
                 if has_attachment:
