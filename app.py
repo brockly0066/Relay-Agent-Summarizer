@@ -281,15 +281,10 @@ st.write("")
 st.write("")
 
 model_name = "gemini-2.5-flash"
-with st.container(border=True):
-    st.markdown('<span class="panel-label"><span class="panel-num">01</span> — Model</span>', unsafe_allow_html=True)
-    model_name = st.selectbox("Model", ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-pro"], label_visibility="collapsed")
-
-st.write("")
 
 # ── Source panel ─────────────────────────────────────────────────────────
 with st.container(border=True):
-    st.markdown('<span class="panel-label"><span class="panel-num">02</span> — Source</span>', unsafe_allow_html=True)
+    st.markdown('<span class="panel-label"><span class="panel-num">01</span> — Source</span>', unsafe_allow_html=True)
     source_type = st.radio("Source type", ["Email thread", "Meeting transcript"],
                             horizontal=True, label_visibility="collapsed")
 
