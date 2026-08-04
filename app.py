@@ -2,11 +2,25 @@ import json
 import time
 import tempfile
 import os
+import io
 import streamlit as st
 import google.generativeai as genai
+from docx import Document
 
 TEXT_EXTS = {"txt", "eml", "md"}
+DOCX_EXTS = {"docx"}
 BINARY_EXTS = {"pdf", "png", "jpg", "jpeg"}
+
+
+def extract_docx_text(file_bytes: bytes) -> str:
+    doc = Document(io.BytesIO(file_bytes))
+    parts = [p.text for p in doc.paragraphs if p.text.strip()]
+    for table in doc.tables:
+        for row in table.rows:
+            row_text = " | ".join(cell.text.strip() for cell in row.cells if cell.text.strip())
+            if row_text:
+                parts.append(row_text)
+    return "\n".join(parts)
 
 # ── Page setup ────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -284,7 +298,7 @@ model_name = "gemini-2.5-flash"
 
 # ── Source panel ─────────────────────────────────────────────────────────
 with st.container(border=True):
-    st.markdown('<span class="panel-label"><span class="panel-num"></span></span>', unsafe_allow_html=True)
+    st.markdown('<span class="panel-label"><span class="panel-num">01</span> — Source</span>', unsafe_allow_html=True)
     source_type = st.radio("Source type", ["Email thread", "Meeting transcript"],
                             horizontal=True, label_visibility="collapsed")
 
@@ -295,8 +309,8 @@ with st.container(border=True):
     pasted_text = st.text_area("Content", height=220, placeholder=placeholder, label_visibility="collapsed")
 
     uploaded = st.file_uploader(
-        "or drop in a file — .txt, .eml, .md, .pdf, or a screenshot (.png / .jpg)",
-        type=["txt", "eml", "md", "pdf", "png", "jpg", "jpeg"],
+        "or drop in a file — .txt, .eml, .md, .docx, .pdf, or a screenshot (.png / .jpg)",
+        type=["txt", "eml", "md", "docx", "pdf", "png", "jpg", "jpeg"],
     )
 
     if uploaded is not None:
@@ -304,6 +318,12 @@ with st.container(border=True):
         if ext in TEXT_EXTS:
             pasted_text = uploaded.read().decode("utf-8", errors="ignore")
             st.caption(f"Loaded text from **{uploaded.name}**.")
+        elif ext in DOCX_EXTS:
+            try:
+                pasted_text = extract_docx_text(uploaded.getvalue())
+                st.caption(f"Extracted text from **{uploaded.name}**.")
+            except Exception as e:
+                st.error(f"Couldn't read {uploaded.name}: {e}")
         elif ext in BINARY_EXTS:
             st.caption(f"**{uploaded.name}** will be read directly by Gemini — no paste needed.")
             st.session_state["_pending_upload"] = {
