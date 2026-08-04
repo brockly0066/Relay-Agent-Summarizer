@@ -4,7 +4,8 @@ import tempfile
 import os
 import io
 import streamlit as st
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from docx import Document
 
 TEXT_EXTS = {"txt", "eml", "md"}
@@ -417,21 +418,27 @@ if run_clicked:
             st.write(f"◆ {stages[-1]}")
 
             try:
-                genai.configure(api_key=api_key, transport="rest")
-                gmodel = genai.GenerativeModel(model_name)
+                client = genai.Client(api_key=api_key)
 
                 if has_attachment:
                     with tempfile.NamedTemporaryFile(delete=False, suffix=pending_upload["suffix"]) as tmp:
                         tmp.write(pending_upload["bytes"])
                         tmp_path = tmp.name
-                    gemini_file = genai.upload_file(tmp_path, mime_type=pending_upload["mime"])
+                    gemini_file = client.files.upload(
+                        file=tmp_path,
+                        config=types.UploadFileConfig(mime_type=pending_upload["mime"]),
+                    )
                     contents = [gemini_file, build_prompt(source_type, has_attachment=True)]
                 else:
                     contents = build_prompt(source_type, text=pasted_text)
 
-                response = gmodel.generate_content(
-                    contents,
-                    generation_config={"response_mime_type": "application/json", "temperature": 0.2},
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=contents,
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        temperature=0.2,
+                    ),
                 )
                 raw = response.text.strip().replace("```json", "").replace("```", "").strip()
                 result = json.loads(raw)
