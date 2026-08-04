@@ -280,34 +280,10 @@ else:
 st.write("")
 st.write("")
 
-# ── Config panel (only shown if no key yet) ────────────────────────────
-if not api_key:
-    with st.container(border=True):
-        st.markdown('<span class="panel-label"><span class="panel-num">01</span> — Connect Gemini</span>', unsafe_allow_html=True)
-        st.markdown("""
-This app reads its API key from **Streamlit secrets**, not from a form on the page — so the key never
-touches the page's HTML or gets typed in public.
-
-**To add it:**
-1. Get a free key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
-2. In your Streamlit Cloud app dashboard → **Settings → Secrets**, add:
-   ```toml
-   GEMINI_API_KEY = "your-key-here"
-   ```
-3. Save — the app restarts automatically and this message disappears.
-
-Running locally? Create `.streamlit/secrets.toml` in the project folder with the same line
-(and make sure it's in `.gitignore` so it never gets committed).
-        """)
-    st.write("")
-
 model_name = "gemini-2.5-flash"
 with st.container(border=True):
-    top = st.columns([3, 1])
-    with top[0]:
-        st.markdown('<span class="panel-label"><span class="panel-num">01</span> — Model</span>' if api_key else '<span class="panel-label"><span class="panel-num">—</span></span>', unsafe_allow_html=True)
-    if api_key:
-        model_name = st.selectbox("Model", ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-pro"], label_visibility="collapsed")
+    st.markdown('<span class="panel-label"><span class="panel-num">01</span> — Model</span>', unsafe_allow_html=True)
+    model_name = st.selectbox("Model", ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-pro"], label_visibility="collapsed")
 
 st.write("")
 
@@ -351,7 +327,7 @@ with st.container(border=True):
 
     run_clicked = st.button("Run agent", disabled=not api_key)
     if not api_key:
-        st.caption("Add `GEMINI_API_KEY` in Streamlit secrets (above) to enable this.")
+        st.caption("Add `GEMINI_API_KEY` in Streamlit secrets to enable this.")
 
 st.write("")
 
