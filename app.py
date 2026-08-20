@@ -299,7 +299,7 @@ model_name = "gemini-2.5-flash"
 
 # ── Source panel ─────────────────────────────────────────────────────────
 with st.container(border=True):
-    st.markdown('<span class="panel-label"><span class="panel-num">01</span> — Source</span>', unsafe_allow_html=True)
+    st.markdown('<span class="panel-label"><span class="panel-num"></span></span>', unsafe_allow_html=True)
     source_type = st.radio("Source type", ["Email thread", "Meeting transcript"],
                             horizontal=True, label_visibility="collapsed")
 
