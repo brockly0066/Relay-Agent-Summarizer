@@ -281,7 +281,7 @@ api_key = get_api_key()
 # ── Header ───────────────────────────────────────────────────────────────
 st.markdown("""
 <div class="eyebrow"><span class="dot"></span>Agent online</div>
-<div class="hero-title"><span class="accent">Relay</span><span class="rest">thread &amp; transcript triage agent</span></div>
+<div class="hero-title"><span class="accent">Text Summerization</span><span class="rest">thread &amp; transcript triage agent</span></div>
 <div class="hero-sub">Drop in an email thread, meeting transcript, PDF, or screenshot. The agent parses it, pulls out
 who owns what, and hands back a clean summary — no more re-reading a 40-message thread to find the one commitment
 that mattered.</div>
