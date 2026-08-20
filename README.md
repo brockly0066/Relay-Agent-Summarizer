@@ -68,3 +68,5 @@ Create one for free at [aistudio.google.com/apikey](https://aistudio.google.com/
 - `.streamlit/secrets.toml.example` — template for your local secrets file (copy → rename → fill in)
 - `.gitignore` — keeps `secrets.toml`, venvs, and editor files out of the repo
 - `LICENSE` — MIT
+##This is the website link :
+https://semantic-aware-text-summarization.streamlit.app/
