@@ -3,10 +3,13 @@ import time
 import tempfile
 import os
 import io
+import base64
 import streamlit as st
 from google import genai
 from google.genai import types
 from docx import Document
+from google_auth_oauthlib.flow import Flow
+from googleapiclient.discovery import build
 
 TEXT_EXTS = {"txt", "eml", "md"}
 DOCX_EXTS = {"docx"}
@@ -22,6 +25,105 @@ def extract_docx_text(file_bytes: bytes) -> str:
             if row_text:
                 parts.append(row_text)
     return "\n".join(parts)
+
+
+# ── Gmail OAuth ──────────────────────────────────────────────────────────
+GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+
+
+def get_gmail_oauth_config():
+    try:
+        return {
+            "client_id": st.secrets["GOOGLE_CLIENT_ID"],
+            "client_secret": st.secrets["GOOGLE_CLIENT_SECRET"],
+            "redirect_uri": st.secrets["GOOGLE_REDIRECT_URI"],
+        }
+    except Exception:
+        return None
+
+
+def build_flow(cfg):
+    return Flow.from_client_config(
+        {
+            "web": {
+                "client_id": cfg["client_id"],
+                "client_secret": cfg["client_secret"],
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "redirect_uris": [cfg["redirect_uri"]],
+            }
+        },
+        scopes=GMAIL_SCOPES,
+        redirect_uri=cfg["redirect_uri"],
+    )
+
+
+def gmail_service_from_session():
+    creds_dict = st.session_state.get("_gmail_creds")
+    if not creds_dict:
+        return None
+    from google.oauth2.credentials import Credentials
+    creds = Credentials(**creds_dict)
+    return build("gmail", "v1", credentials=creds)
+
+
+def decode_body(data: str) -> str:
+    if not data:
+        return ""
+    padded = data + "=" * (-len(data) % 4)
+    return base64.urlsafe_b64decode(padded).decode("utf-8", errors="ignore")
+
+
+def strip_html(html: str) -> str:
+    import re
+    text = re.sub(r"<(script|style)[^>]*>.*?</\1>", "", html, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"</p>", "\n\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", "", text)
+    return text.strip()
+
+
+def extract_body_from_payload(payload) -> str:
+    if not payload:
+        return ""
+    mime_type = payload.get("mimeType", "")
+    body = payload.get("body", {})
+    if mime_type == "text/plain" and body.get("data"):
+        return decode_body(body["data"])
+    if mime_type == "text/html" and body.get("data"):
+        return strip_html(decode_body(body["data"]))
+    plain, html = "", ""
+    for part in payload.get("parts", []) or []:
+        pm = part.get("mimeType", "")
+        pb = part.get("body", {})
+        if pm == "text/plain" and pb.get("data") and not plain:
+            plain = decode_body(pb["data"])
+        elif pm == "text/html" and pb.get("data") and not html:
+            html = strip_html(decode_body(pb["data"]))
+        elif part.get("parts"):
+            nested = extract_body_from_payload(part)
+            if nested and not plain:
+                plain = nested
+    return plain or html
+
+
+def header_value(headers, name):
+    for h in headers or []:
+        if h.get("name", "").lower() == name.lower():
+            return h.get("value", "")
+    return ""
+
+
+def format_thread_as_text(thread: dict) -> str:
+    blocks = []
+    for msg in thread.get("messages", []):
+        headers = msg.get("payload", {}).get("headers", [])
+        sender = header_value(headers, "From")
+        date = header_value(headers, "Date")
+        subject = header_value(headers, "Subject")
+        body = extract_body_from_payload(msg.get("payload", {}))
+        blocks.append(f"From: {sender}\nDate: {date}\nSubject: {subject}\n\n{body.strip()}")
+    return "\n\n---\n\n".join(blocks)
 
 # ── Page setup ────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -277,6 +379,26 @@ def get_api_key():
         return None
 
 api_key = get_api_key()
+gmail_cfg = get_gmail_oauth_config()
+
+# Handle the redirect back from Google's consent screen
+if gmail_cfg and "code" in st.query_params and "_gmail_creds" not in st.session_state:
+    try:
+        flow = build_flow(gmail_cfg)
+        flow.fetch_token(code=st.query_params["code"])
+        creds = flow.credentials
+        st.session_state["_gmail_creds"] = {
+            "token": creds.token,
+            "refresh_token": creds.refresh_token,
+            "token_uri": creds.token_uri,
+            "client_id": creds.client_id,
+            "client_secret": creds.client_secret,
+            "scopes": creds.scopes,
+        }
+        st.query_params.clear()
+        st.rerun()
+    except Exception as e:
+        st.error(f"Gmail connection failed: {e}")
 
 # ── Header ───────────────────────────────────────────────────────────────
 st.markdown("""
@@ -303,43 +425,116 @@ with st.container(border=True):
     source_type = st.radio("Source type", ["Email thread", "Meeting transcript"],
                             horizontal=True, label_visibility="collapsed")
 
-    placeholder = ("Paste the full email thread here — include sender names and timestamps if you have them. "
-                    "The agent reads the whole thing, not just the latest reply.") if source_type == "Email thread" \
-        else "Paste the meeting transcript here — speaker labels help, but plain text works too."
+    gmail_service = gmail_service_from_session() if source_type == "Email thread" else None
+    input_method = "Paste or upload"
+    if source_type == "Email thread" and gmail_cfg:
+        input_method = st.radio("Input method", ["Paste or upload", "Connect Gmail"],
+                                 horizontal=True, label_visibility="collapsed")
 
-    pasted_text = st.text_area("Content", height=220, placeholder=placeholder, label_visibility="collapsed")
+    pasted_text = ""
 
-    uploaded = st.file_uploader(
-        "or drop in a file — .txt, .eml, .md, .docx, .pdf, or a screenshot (.png / .jpg)",
-        type=["txt", "eml", "md", "docx", "pdf", "png", "jpg", "jpeg"],
-    )
+    if input_method == "Connect Gmail":
+        if not gmail_service:
+            flow = build_flow(gmail_cfg)
+            auth_url, _ = flow.authorization_url(access_type="offline", prompt="consent")
+            st.link_button("Connect Gmail", auth_url)
+            st.caption("Opens Google's consent screen. You'll be redirected back here once you approve access.")
+        else:
+            col_a, col_b = st.columns([4, 1])
+            with col_a:
+                gmail_query = st.text_input("Search Gmail", placeholder="from:alex subject:budget",
+                                             label_visibility="collapsed")
+            with col_b:
+                search_clicked = st.button("Search")
+            if search_clicked or "_gmail_results" in st.session_state:
+                if search_clicked:
+                    try:
+                        resp = gmail_service.users().messages().list(
+                            userId="me", q=gmail_query or "", maxResults=10
+                        ).execute()
+                        results = []
+                        for m in resp.get("messages", []):
+                            meta = gmail_service.users().messages().get(
+                                userId="me", id=m["id"], format="metadata",
+                                metadataHeaders=["Subject", "From", "Date"],
+                            ).execute()
+                            headers = meta.get("payload", {}).get("headers", [])
+                            results.append({
+                                "thread_id": meta["threadId"],
+                                "subject": header_value(headers, "Subject") or "(no subject)",
+                                "from": header_value(headers, "From"),
+                                "date": header_value(headers, "Date"),
+                            })
+                        st.session_state["_gmail_results"] = results
+                    except Exception as e:
+                        st.error(f"Gmail search failed: {e}")
+                        st.session_state["_gmail_results"] = []
 
-    if uploaded is not None:
-        ext = uploaded.name.rsplit(".", 1)[-1].lower()
-        if ext in TEXT_EXTS:
-            pasted_text = uploaded.read().decode("utf-8", errors="ignore")
-            st.caption(f"Loaded text from **{uploaded.name}**.")
-        elif ext in DOCX_EXTS:
-            try:
-                pasted_text = extract_docx_text(uploaded.getvalue())
-                st.caption(f"Extracted text from **{uploaded.name}**.")
-            except Exception as e:
-                st.error(f"Couldn't read {uploaded.name}: {e}")
-        elif ext in BINARY_EXTS:
-            st.caption(f"**{uploaded.name}** will be read directly by Gemini — no paste needed.")
-            st.session_state["_pending_upload"] = {
-                "bytes": uploaded.getvalue(),
-                "suffix": f".{ext}",
-                "mime": {
-                    "pdf": "application/pdf",
-                    "png": "image/png",
-                    "jpg": "image/jpeg",
-                    "jpeg": "image/jpeg",
-                }[ext],
-                "name": uploaded.name,
-            }
-    else:
-        st.session_state.pop("_pending_upload", None)
+                results = st.session_state.get("_gmail_results", [])
+                if results:
+                    labels = [f"{r['subject']} — {r['from']} ({r['date']})" for r in results]
+                    picked = st.selectbox("Pick a thread", labels, label_visibility="collapsed")
+                    picked_idx = labels.index(picked)
+                    if st.button("Load this thread"):
+                        try:
+                            thread_id = results[picked_idx]["thread_id"]
+                            thread = gmail_service.users().threads().get(
+                                userId="me", id=thread_id, format="full"
+                            ).execute()
+                            st.session_state["_loaded_gmail_text"] = format_thread_as_text(thread)
+                        except Exception as e:
+                            st.error(f"Couldn't load thread: {e}")
+                elif search_clicked:
+                    st.caption("No matching threads found.")
+
+            if st.session_state.get("_loaded_gmail_text"):
+                st.text_area("Loaded thread", value=st.session_state["_loaded_gmail_text"],
+                              height=220, disabled=True)
+                pasted_text = st.session_state["_loaded_gmail_text"]
+                if st.button("Disconnect Gmail"):
+                    st.session_state.pop("_gmail_creds", None)
+                    st.session_state.pop("_gmail_results", None)
+                    st.session_state.pop("_loaded_gmail_text", None)
+                    st.rerun()
+
+    if input_method == "Paste or upload":
+        placeholder = ("Paste the full email thread here — include sender names and timestamps if you have them. "
+                        "The agent reads the whole thing, not just the latest reply.") if source_type == "Email thread" \
+            else "Paste the meeting transcript here — speaker labels help, but plain text works too."
+
+        pasted_text = st.text_area("Content", height=220, placeholder=placeholder, label_visibility="collapsed")
+
+        uploaded = st.file_uploader(
+            "or drop in a file — .txt, .eml, .md, .docx, .pdf, or a screenshot (.png / .jpg)",
+            type=["txt", "eml", "md", "docx", "pdf", "png", "jpg", "jpeg"],
+        )
+
+        if uploaded is not None:
+            ext = uploaded.name.rsplit(".", 1)[-1].lower()
+            if ext in TEXT_EXTS:
+                pasted_text = uploaded.read().decode("utf-8", errors="ignore")
+                st.caption(f"Loaded text from **{uploaded.name}**.")
+            elif ext in DOCX_EXTS:
+                try:
+                    pasted_text = extract_docx_text(uploaded.getvalue())
+                    st.caption(f"Extracted text from **{uploaded.name}**.")
+                except Exception as e:
+                    st.error(f"Couldn't read {uploaded.name}: {e}")
+            elif ext in BINARY_EXTS:
+                st.caption(f"**{uploaded.name}** will be read directly by Gemini — no paste needed.")
+                st.session_state["_pending_upload"] = {
+                    "bytes": uploaded.getvalue(),
+                    "suffix": f".{ext}",
+                    "mime": {
+                        "pdf": "application/pdf",
+                        "png": "image/png",
+                        "jpg": "image/jpeg",
+                        "jpeg": "image/jpeg",
+                    }[ext],
+                    "name": uploaded.name,
+                }
+        else:
+            st.session_state.pop("_pending_upload", None)
 
     run_clicked = st.button("Run agent", disabled=not api_key)
     if not api_key:
@@ -487,8 +682,7 @@ if run_clicked:
 
 st.markdown("""
 <div class="footnote">
-Relay v0.2 · reads its Gemini key from Streamlit secrets, never from the page<br>
-Want live Gmail / Calendar ingestion instead of paste? That needs a Google OAuth client ID registered on your own
-Google Cloud project — wire it in whenever you're ready.
+Relay v0.3 · reads its Gemini key from Streamlit secrets, never from the page<br>
+"Connect Gmail" needs GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REDIRECT_URI in secrets — see README.
 </div>
 """, unsafe_allow_html=True)
