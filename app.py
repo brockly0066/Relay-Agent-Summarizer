@@ -300,6 +300,29 @@ div[role="radiogroup"] label {
 .stButton > button:hover { box-shadow: 0 6px 28px rgba(255,122,92,0.4) !important; transform: translateY(-1px); color: #1A0F0C !important; }
 .stButton > button:disabled { opacity: 0.4 !important; box-shadow: none !important; }
 
+/* Gmail connect button */
+.gmail-connect-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid var(--hairline);
+    color: var(--text) !important;
+    font-family: 'Inter', sans-serif;
+    font-weight: 600;
+    font-size: 14px;
+    border-radius: 12px;
+    padding: 11px 20px;
+    text-decoration: none !important;
+    transition: all 0.15s;
+}
+.gmail-connect-btn:hover {
+    border-color: var(--coral);
+    background: rgba(255,122,92,0.08);
+    transform: translateY(-1px);
+}
+.gmail-connect-btn svg { flex-shrink: 0; }
+
 /* File uploader */
 [data-testid="stFileUploaderDropzone"] {
     background: rgba(255,255,255,0.03) !important;
@@ -437,7 +460,16 @@ with st.container(border=True):
         if not gmail_service:
             flow = build_flow(gmail_cfg)
             auth_url, _ = flow.authorization_url(access_type="offline", prompt="consent")
-            st.link_button("Connect Gmail", auth_url)
+            st.markdown(f"""
+            <a href="{auth_url}" target="_self" class="gmail-connect-btn">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M22 5.5v13c0 1.1-.9 2-2 2h-2.5V10.7l-5.5 4.6-5.5-4.6v9.8H4c-1.1 0-2-.9-2-2v-13c0-.85.53-1.58 1.28-1.87L12 10.5l8.72-6.87c.75.29 1.28 1.02 1.28 1.87z" fill="#FF7A5C"/>
+                    <path d="M2 5.5c0-.85.53-1.58 1.28-1.87L12 10.5V21H4c-1.1 0-2-.9-2-2v-13.5z" fill="#8B7FE8" fill-opacity="0.55"/>
+                    <path d="M22 5.5c0-.85-.53-1.58-1.28-1.87L12 10.5V21h8c1.1 0 2-.9 2-2v-13.5z" fill="#6EE7D8" fill-opacity="0.45"/>
+                </svg>
+                <span>Connect Gmail</span>
+            </a>
+            """, unsafe_allow_html=True)
             st.caption("Opens Google's consent screen. You'll be redirected back here once you approve access.")
         else:
             col_a, col_b = st.columns([4, 1])
